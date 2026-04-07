@@ -9,6 +9,10 @@ services:
     restart: unless-stopped
     ports:
       - "3005:3000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ticketapp.rule=Host(`tiquetera.ktuche.com`)"
+      - "traefik.http.services.ticketapp.loadbalancer.server.port=3000"
     environment:
       - NODE_ENV=production
     env_file:
