@@ -51,6 +51,7 @@ export default function ClientesList({ isAdmin }: ClientesListProps) {
   const [editCliente, setEditCliente] = useState<Cliente | null>(null);
   
   const [toast, setToast] = useState<{ msg: string; tipo: "ok" | "err" } | null>(null);
+  const [mostrarInativos, setMostrarInativos] = useState(false);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -66,12 +67,12 @@ export default function ClientesList({ isAdmin }: ClientesListProps) {
     setTimeout(() => setToast(null), 3500);
   };
 
-  const fetchClientes = useCallback(async (termino: string) => {
+  const fetchClientes = useCallback(async (termino: string, inativos = false) => {
     setLoading(true);
     let query = supabase
       .from("clientes")
       .select("*")
-      .eq("activo", true)
+      .eq("activo", !inativos)
       .order("nombre", { ascending: true });
 
     if (termino.trim()) {
@@ -86,10 +87,10 @@ export default function ClientesList({ isAdmin }: ClientesListProps) {
   // Debounce for search
   useEffect(() => {
     const timer = setTimeout(() => {
-      fetchClientes(busca);
+      fetchClientes(busca, mostrarInativos);
     }, 350);
     return () => clearTimeout(timer);
-  }, [busca, fetchClientes]);
+  }, [busca, mostrarInativos, fetchClientes]);
 
   const abrirSheetNovo = () => {
     setEditCliente(null);
@@ -138,7 +139,7 @@ export default function ClientesList({ isAdmin }: ClientesListProps) {
   };
 
   const desativarCliente = async (id: string, event: React.MouseEvent) => {
-    event.preventDefault(); // prevent navigation
+    event.preventDefault();
     if (!confirm("¿Desactivar este cliente? No se borrará, solo se ocultará.")) return;
     const { error } = await supabase
       .from("clientes")
@@ -147,7 +148,20 @@ export default function ClientesList({ isAdmin }: ClientesListProps) {
     if (error) showToast("Error al desactivar el cliente.", "err");
     else {
       showToast("Cliente desactivado.", "ok");
-      fetchClientes(busca);
+      fetchClientes(busca, mostrarInativos);
+    }
+  };
+
+  const reativarCliente = async (id: string, event: React.MouseEvent) => {
+    event.preventDefault();
+    const { error } = await supabase
+      .from("clientes")
+      .update({ activo: true })
+      .eq("id", id);
+    if (error) showToast("Error al reactivar el cliente.", "err");
+    else {
+      showToast("✅ ¡Cliente reactivado!", "ok");
+      fetchClientes(busca, mostrarInativos);
     }
   };
 
@@ -169,12 +183,24 @@ export default function ClientesList({ isAdmin }: ClientesListProps) {
         <div>
           <h2 className="text-2xl font-bold text-secondary">Clientes</h2>
           <p className="text-muted text-sm mt-0.5">
-            {loading ? "Cargando..." : `${clientes.length} cliente${clientes.length !== 1 ? "s" : ""} activo${clientes.length !== 1 ? "s" : ""}`}
+            {loading ? "Cargando..." : `${clientes.length} cliente${clientes.length !== 1 ? "s" : ""} ${mostrarInativos ? "inactivo" : "activo"}${clientes.length !== 1 ? "s" : ""}`}
           </p>
         </div>
-        <Button onClick={abrirSheetNovo} className="px-5 py-2.5 h-auto text-lg rounded-xl shadow-md">
-          <span className="text-xl mr-2">+</span> Nuevo Cliente
-        </Button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setMostrarInativos(!mostrarInativos)}
+            className={`px-4 py-2 rounded-xl text-sm font-semibold border-2 transition-all ${
+              mostrarInativos
+                ? "bg-warning/10 border-warning text-warning"
+                : "bg-surface border-border text-muted hover:border-secondary"
+            }`}
+          >
+            {mostrarInativos ? "👁️ Viendo Inactivos" : "👁️ Ver Inactivos"}
+          </button>
+          <Button onClick={abrirSheetNovo} className="px-5 py-2.5 h-auto text-lg rounded-xl shadow-md">
+            <span className="text-xl mr-2">+</span> Nuevo Cliente
+          </Button>
+        </div>
       </div>
 
       {/* Search */}
@@ -246,13 +272,23 @@ export default function ClientesList({ isAdmin }: ClientesListProps) {
                   >
                     ✏️
                   </button>
-                  <button
-                    onClick={(e) => desativarCliente(c.id, e)}
-                    className="p-2 text-muted hover:text-danger hover:bg-danger/10 rounded-lg transition-colors"
-                    title="Desactivar"
-                  >
-                    🚫
-                  </button>
+                  {mostrarInativos ? (
+                    <button
+                      onClick={(e) => reativarCliente(c.id, e)}
+                      className="p-2 text-muted hover:text-success hover:bg-success/10 rounded-lg transition-colors"
+                      title="Reactivar cliente"
+                    >
+                      ✅
+                    </button>
+                  ) : (
+                    <button
+                      onClick={(e) => desativarCliente(c.id, e)}
+                      className="p-2 text-muted hover:text-danger hover:bg-danger/10 rounded-lg transition-colors"
+                      title="Desactivar"
+                    >
+                      🚫
+                    </button>
+                  )}
                 </div>
               )}
 
