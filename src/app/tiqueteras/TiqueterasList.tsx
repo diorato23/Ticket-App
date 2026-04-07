@@ -37,6 +37,7 @@ interface Tiquetera {
   fecha_inicio: string;
   fecha_vencimiento: string;
   estado: string;
+  token_publico?: string;
   clientes?: { nombre: string }; // joined from DB
 }
 
