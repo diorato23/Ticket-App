@@ -1,5 +1,10 @@
 version: '3.8'
 
+networks:
+  default:
+    name: n8n_default
+    external: true
+
 services:
   ticket-app:
     build:
