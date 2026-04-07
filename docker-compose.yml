@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  ticket-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ticket-app-prod
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    env_file:
+      - .env.local
