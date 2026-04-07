@@ -17,6 +17,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.ticketapp.rule=Host(`tiquetera.ktuche.com`)"
+      - "traefik.http.routers.ticketapp.entrypoints=websecure"
+      - "traefik.http.routers.ticketapp.tls.certresolver=mytlschallenge"
       - "traefik.http.services.ticketapp.loadbalancer.server.port=3000"
     environment:
       - NODE_ENV=production
