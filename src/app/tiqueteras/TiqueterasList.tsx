@@ -181,18 +181,33 @@ export default function TiqueterasList({ isAdmin }: TiqueterasListProps) {
     }
   };
 
-  const excluirTiquetera = async (id: string) => {
+  const reativarTiquetera = async (id: string, tipo: number) => {
     if (!isAdmin) return;
-    if (!confirm("¿Eliminar esta tiquetera permanentemente? Esta acción NO se puede deshacer.")) return;
+    if (!confirm("¿Reactivar esta tiquetera? El cliente podrá seguir usando su saldo restante.")) return;
     
+    // Extend the expiration date from today for the remaining days
+    const hoy = new Date();
+    const formatLocalDate = (d: Date) => {
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      return `${yyyy}-${mm}-${dd}`;
+    };
+    
+    const novaVencimento = new Date(hoy);
+    novaVencimento.setDate(novaVencimento.getDate() + tipo);
+
     const { error } = await supabase
       .from("tiqueteras")
-      .delete()
+      .update({
+        estado: "activa",
+        fecha_vencimiento: formatLocalDate(novaVencimento),
+      })
       .eq("id", id);
       
-    if (error) showToast("Error al eliminar la tiquetera.", "err");
+    if (error) showToast("Error al reactivar la tiquetera.", "err");
     else {
-      showToast("Tiquetera eliminada.", "ok");
+      showToast("✅ ¡Tiquetera reactivada! Vencimiento actualizado.", "ok");
       fetchTiqueteras();
     }
   };
@@ -274,23 +289,25 @@ export default function TiqueterasList({ isAdmin }: TiqueterasListProps) {
                   ${t.precio.toLocaleString("es-CO")}
                 </p>
                 {isAdmin && (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap justify-end">
                     {t.estado === "activa" && (
                       <button
                         onClick={() => anularTiquetera(t.id)}
                         className="text-xs px-3 py-1.5 bg-warning/10 text-warning hover:bg-warning/20 rounded-md transition-colors font-medium"
-                        title="Anular (marcar como vencida)"
+                        title="Anular (pausar tiquetera)"
                       >
                         ⛔ Anular
                       </button>
                     )}
-                    <button
-                      onClick={() => excluirTiquetera(t.id)}
-                      className="text-xs px-3 py-1.5 bg-danger/10 text-danger hover:bg-danger/20 rounded-md transition-colors font-medium"
-                      title="Eliminar permanentemente"
-                    >
-                      🗑️ Eliminar
-                    </button>
+                    {(t.estado === "vencida" || t.estado === "anulada") && (
+                      <button
+                        onClick={() => reativarTiquetera(t.id, t.tipo)}
+                        className="text-xs px-3 py-1.5 bg-success/10 text-success hover:bg-success/20 rounded-md transition-colors font-medium"
+                        title="Reactivar para que el cliente use su saldo"
+                      >
+                        ✅ Reactivar
+                      </button>
+                    )}
                     <button
                       onClick={() => {
                         const link = `${window.location.origin}/mi-tiquetera/${t.token_publico}`;
