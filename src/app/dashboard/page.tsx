@@ -49,7 +49,8 @@ export default async function DashboardPage() {
     { count: totalTiqueterasAtivas },
     { data: marcacoesHoje },
     { data: ingresosMes },
-    { data: porVencer }
+    { data: porVencer },
+    { data: movimentacoesHoje },
   ] = await Promise.all([
     supabase.from("clientes").select("*", { count: "exact", head: true }).eq("activo", true),
     supabase.from("tiqueteras").select("*", { count: "exact", head: true }).eq("estado", "activa"),
@@ -61,6 +62,22 @@ export default async function DashboardPage() {
       .lte("fecha_vencimiento", in3DaysStr)
       .gte("fecha_vencimiento", todayStr)
       .order("fecha_vencimiento", { ascending: true }),
+    // Nova query: movimentações ricas do dia
+    supabase.from("marcaciones")
+      .select(`
+        id,
+        fecha,
+        desechable,
+        tiqueteras (
+          id,
+          tipo,
+          estado,
+          clientes ( nombre, telefono_wsp )
+        ),
+        usuarios ( nombre )
+      `)
+      .gte("fecha", todayStr)
+      .order("fecha", { ascending: false }),
   ]);
 
   // Cálculos Derivados
@@ -75,6 +92,16 @@ export default async function DashboardPage() {
   const porcentagemOcupacao = Math.min(Math.round((marcacoesCount / totalAlmuerzosHoy) * 100), 100);
 
   const primeiroNome = usuario?.nombre?.split(" ")[0] ?? "Vladimir";
+
+  // Helper: formatar hora local (UTC-5 Bogotá)
+  const formatHora = (dateStr: string) => {
+    return new Date(dateStr).toLocaleTimeString("es-CO", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "America/Bogota",
+    });
+  };
 
   return (
     <div className="min-h-screen bg-surface pb-20 sm:pb-0">
@@ -181,6 +208,129 @@ export default async function DashboardPage() {
                   </div>
                 </div>
               )}
+
+              {/* ════════════════════════════════════════════ */}
+              {/* SECCIÓN: Movimientos del Día                */}
+              {/* ════════════════════════════════════════════ */}
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-bold text-secondary flex items-center gap-2">
+                    <span>📋</span> Movimientos del Día
+                    <span className="ml-2 text-sm font-semibold bg-primary/10 text-primary px-3 py-0.5 rounded-full">
+                      {marcacoesCount} registros
+                    </span>
+                  </h3>
+                  <Link
+                    href="/dashboard"
+                    className="text-sm font-medium text-muted hover:text-primary transition-colors flex items-center gap-1"
+                  >
+                    🔄 Actualizar
+                  </Link>
+                </div>
+
+                {!movimentacoesHoje || movimentacoesHoje.length === 0 ? (
+                  <div className="bg-white rounded-3xl border border-border p-12 text-center shadow-sm">
+                    <span className="text-5xl block mb-3 opacity-50">🍽️</span>
+                    <p className="font-semibold text-muted text-lg">Sin movimientos registrados hoy.</p>
+                    <p className="text-sm text-muted mt-1">Los registros de marcación aparecerán aquí en tiempo real.</p>
+                    <Link
+                      href="/marcacion"
+                      className="inline-block mt-5 bg-primary text-white font-bold px-6 py-2.5 rounded-xl hover:bg-primary-dark transition-colors shadow-md shadow-primary/20"
+                    >
+                      Ir a Marcación →
+                    </Link>
+                  </div>
+                ) : (
+                  <div className="bg-white rounded-3xl border border-border shadow-sm overflow-hidden">
+                    {/* Tabla Header */}
+                    <div className="hidden sm:grid grid-cols-12 gap-4 px-6 py-3 bg-surface border-b border-border text-xs font-bold text-muted uppercase tracking-wider">
+                      <div className="col-span-4">Cliente</div>
+                      <div className="col-span-2 text-center">Hora</div>
+                      <div className="col-span-2 text-center">Plan</div>
+                      <div className="col-span-2 text-center">Desechable</div>
+                      <div className="col-span-2 text-center">Operador</div>
+                    </div>
+
+                    {/* Filas */}
+                    <div className="divide-y divide-border/60">
+                      {movimentacoesHoje.map((m: any, idx: number) => {
+                        const tiquetera = m.tiqueteras;
+                        const cliente = tiquetera
+                          ? (Array.isArray(tiquetera.clientes) ? tiquetera.clientes[0] : tiquetera.clientes)
+                          : null;
+                        const operador = Array.isArray(m.usuarios) ? m.usuarios[0] : m.usuarios;
+
+                        return (
+                          <div
+                            key={m.id}
+                            className={`px-6 py-4 flex flex-col sm:grid sm:grid-cols-12 gap-2 sm:gap-4 sm:items-center hover:bg-surface/60 transition-colors ${idx === 0 ? "bg-success/5" : ""}`}
+                          >
+                            {/* Cliente */}
+                            <div className="col-span-4 flex items-center gap-3">
+                              <div className="w-9 h-9 bg-primary/10 rounded-full flex items-center justify-center text-primary font-bold text-base flex-shrink-0">
+                                {cliente?.nombre?.charAt(0)?.toUpperCase() ?? "?"}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="font-semibold text-secondary truncate">{cliente?.nombre ?? "—"}</p>
+                                <p className="text-xs text-muted truncate">{cliente?.telefono_wsp ?? ""}</p>
+                              </div>
+                              {idx === 0 && (
+                                <span className="ml-1 text-xs font-bold text-success bg-success/10 px-2 py-0.5 rounded-full flex-shrink-0">
+                                  Último
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Hora */}
+                            <div className="col-span-2 sm:text-center">
+                              <span className="text-sm font-mono font-semibold text-secondary">
+                                {formatHora(m.fecha)}
+                              </span>
+                            </div>
+
+                            {/* Plan */}
+                            <div className="col-span-2 sm:text-center">
+                              <span className="text-sm font-bold text-primary-dark bg-primary/10 px-2.5 py-1 rounded-full">
+                                {tiquetera?.tipo ?? "?"} días
+                              </span>
+                            </div>
+
+                            {/* Desechable */}
+                            <div className="col-span-2 sm:text-center">
+                              {m.desechable ? (
+                                <span className="inline-flex items-center gap-1 text-xs font-bold text-warning-dark bg-warning/10 px-2.5 py-1 rounded-full">
+                                  🥡 +$1.000
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted">—</span>
+                              )}
+                            </div>
+
+                            {/* Operador */}
+                            <div className="col-span-2 sm:text-center">
+                              <span className="text-sm text-muted font-medium truncate">
+                                {operador?.nombre ?? "Sistema"}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Footer totales */}
+                    <div className="px-6 py-4 bg-surface/80 border-t border-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                      <p className="text-sm text-muted font-medium">
+                        Total de almuerzos hoy: <span className="font-bold text-secondary">{marcacoesCount}</span>
+                      </p>
+                      {desechablesCount > 0 && (
+                        <p className="text-sm text-warning-dark font-semibold">
+                          🥡 {desechablesCount} desechable{desechablesCount !== 1 ? "s" : ""} — Extra: ${ingresosDesechables.toLocaleString("es-CO")}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Direita: Avisos de Vencimento e Ações */}
