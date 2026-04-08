@@ -15,6 +15,7 @@ export default function Navbar({ rol, nombre, logout }: NavbarProps) {
 
   const adminLinks = [
     { href: "/dashboard", label: "Dashboard", icon: "📊" },
+    { href: "/reportes", label: "Reportes", icon: "📑" },
     { href: "/clientes", label: "Clientes", icon: "👥" },
     { href: "/marcacion", label: "Marcación", icon: "✅" },
     { href: "/dashboard/equipe", label: "Equipo", icon: "🛡️" },
