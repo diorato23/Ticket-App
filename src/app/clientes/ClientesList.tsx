@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -24,6 +24,12 @@ interface Cliente {
   notas: string | null;
   activo: boolean;
   created_at: string;
+  cedula: string | null;
+  telefono_2: string | null;
+  email: string | null;
+  fecha_nacimiento: string | null;
+  codigo: number | null;
+  pontos_fidelidade: number;
 }
 
 interface ClientesListProps {
@@ -32,9 +38,18 @@ interface ClientesListProps {
 
 const formSchema = z.object({
   nombre: z.string().min(1, "El nombre es obligatorio"),
+  cedula: z.string().min(1, "La cédula es obligatoria"),
   telefono_wsp: z
     .string()
     .regex(/^\d{10}$/, "El teléfono debe tener exactamente 10 dígitos (sin código de país)."),
+  telefono_2: z
+    .string()
+    .regex(/^\d{10}$/, "El teléfono 2 debe tener 10 dígitos.")
+    .optional()
+    .or(z.literal("")),
+  email: z.string().email("Email inválido").optional().or(z.literal("")),
+  fecha_nacimiento: z.string().optional().or(z.literal("")),
+  codigo: z.string().optional(),
   notas: z.string().optional(),
 });
 
@@ -45,19 +60,24 @@ export default function ClientesList({ isAdmin }: ClientesListProps) {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [busca, setBusca] = useState("");
   const [loading, setLoading] = useState(true);
-  
-  // Sheet states
+
   const [showSheet, setShowSheet] = useState(false);
   const [editCliente, setEditCliente] = useState<Cliente | null>(null);
-  
+
   const [toast, setToast] = useState<{ msg: string; tipo: "ok" | "err" } | null>(null);
   const [mostrarInativos, setMostrarInativos] = useState(false);
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    resolver: zodResolver(formSchema) as any,
     defaultValues: {
       nombre: "",
+      cedula: "",
       telefono_wsp: "",
+      telefono_2: "",
+      email: "",
+      fecha_nacimiento: "",
+      codigo: "",
       notas: "",
     },
   });
@@ -76,15 +96,14 @@ export default function ClientesList({ isAdmin }: ClientesListProps) {
       .order("nombre", { ascending: true });
 
     if (termino.trim()) {
-      query = query.or(`nombre.ilike.%${termino}%,telefono_wsp.ilike.%${termino}%`);
+      query = query.or(`nombre.ilike.%${termino}%,telefono_wsp.ilike.%${termino}%,cedula.ilike.%${termino}%`);
     }
 
     const { data, error } = await query;
-    if (!error && data) setClientes(data);
+    if (!error && data) setClientes(data as Cliente[]);
     setLoading(false);
   }, [supabase]);
 
-  // Debounce for search
   useEffect(() => {
     const timer = setTimeout(() => {
       fetchClientes(busca, mostrarInativos);
@@ -95,9 +114,8 @@ export default function ClientesList({ isAdmin }: ClientesListProps) {
   const abrirSheetNovo = () => {
     setEditCliente(null);
     form.reset({
-      nombre: "",
-      telefono_wsp: "",
-      notas: "",
+      nombre: "", cedula: "", telefono_wsp: "", telefono_2: "",
+      email: "", fecha_nacimiento: "", codigo: "", notas: "",
     });
     setShowSheet(true);
   };
@@ -106,7 +124,12 @@ export default function ClientesList({ isAdmin }: ClientesListProps) {
     setEditCliente(c);
     form.reset({
       nombre: c.nombre,
+      cedula: c.cedula || "",
       telefono_wsp: c.telefono_wsp,
+      telefono_2: c.telefono_2 || "",
+      email: c.email || "",
+      fecha_nacimiento: c.fecha_nacimiento || "",
+      codigo: c.codigo != null ? String(c.codigo) : "",
       notas: c.notas || "",
     });
     setShowSheet(true);
@@ -115,7 +138,12 @@ export default function ClientesList({ isAdmin }: ClientesListProps) {
   const onSubmit = async (values: FormValues) => {
     const dataToSave = {
       nombre: values.nombre.trim(),
+      cedula: values.cedula?.trim() || null,
       telefono_wsp: values.telefono_wsp.trim(),
+      telefono_2: values.telefono_2?.trim() || null,
+      email: values.email?.trim() || null,
+      fecha_nacimiento: values.fecha_nacimiento?.trim() || null,
+      codigo: values.codigo && values.codigo !== "" ? parseInt(String(values.codigo), 10) : null,
       notas: values.notas?.trim() || null,
     };
 
@@ -124,56 +152,45 @@ export default function ClientesList({ isAdmin }: ClientesListProps) {
         .from("clientes")
         .update(dataToSave)
         .eq("id", editCliente.id);
-      if (error) showToast("Error al actualizar el cliente.", "err");
-      else showToast("Cliente actualizado correctamente.", "ok");
+      if (error) {
+        showToast(error.message.includes("unique") ? "Ese código ya está en uso." : "Error al actualizar el cliente.", "err");
+      } else {
+        showToast("Cliente actualizado correctamente.", "ok");
+        setShowSheet(false);
+        fetchClientes(busca, mostrarInativos);
+      }
     } else {
-      const { error } = await supabase
-        .from("clientes")
-        .insert(dataToSave);
-      if (error) showToast("Error al registrar el cliente.", "err");
-      else showToast("¡Cliente registrado correctamente!", "ok");
+      const { error } = await supabase.from("clientes").insert(dataToSave);
+      if (error) {
+        showToast(error.message.includes("unique") ? "Ese código ya está en uso." : "Error al registrar el cliente.", "err");
+      } else {
+        showToast("¡Cliente registrado correctamente!", "ok");
+        setShowSheet(false);
+        fetchClientes(busca, mostrarInativos);
+      }
     }
-
-    setShowSheet(false);
-    fetchClientes(busca);
   };
 
   const desativarCliente = async (id: string, event: React.MouseEvent) => {
     event.preventDefault();
     if (!confirm("¿Desactivar este cliente? No se borrará, solo se ocultará.")) return;
-    const { error } = await supabase
-      .from("clientes")
-      .update({ activo: false })
-      .eq("id", id);
+    const { error } = await supabase.from("clientes").update({ activo: false }).eq("id", id);
     if (error) showToast("Error al desactivar el cliente.", "err");
-    else {
-      showToast("Cliente desactivado.", "ok");
-      fetchClientes(busca, mostrarInativos);
-    }
+    else { showToast("Cliente desactivado.", "ok"); fetchClientes(busca, mostrarInativos); }
   };
 
   const reativarCliente = async (id: string, event: React.MouseEvent) => {
     event.preventDefault();
-    const { error } = await supabase
-      .from("clientes")
-      .update({ activo: true })
-      .eq("id", id);
+    const { error } = await supabase.from("clientes").update({ activo: true }).eq("id", id);
     if (error) showToast("Error al reactivar el cliente.", "err");
-    else {
-      showToast("✅ ¡Cliente reactivado!", "ok");
-      fetchClientes(busca, mostrarInativos);
-    }
+    else { showToast("✅ ¡Cliente reactivado!", "ok"); fetchClientes(busca, mostrarInativos); }
   };
 
   return (
     <div>
       {/* Toast */}
       {toast && (
-        <div
-          className={`fixed top-5 right-5 z-50 px-5 py-3 rounded-xl shadow-lg text-white text-sm font-medium animate-fade-in ${
-            toast.tipo === "ok" ? "bg-success" : "bg-danger"
-          }`}
-        >
+        <div className={`fixed top-5 right-5 z-50 px-5 py-3 rounded-xl shadow-lg text-white text-sm font-medium animate-fade-in ${toast.tipo === "ok" ? "bg-success" : "bg-danger"}`}>
           {toast.tipo === "ok" ? "✅" : "❌"} {toast.msg}
         </div>
       )}
@@ -189,11 +206,7 @@ export default function ClientesList({ isAdmin }: ClientesListProps) {
         <div className="flex gap-2">
           <button
             onClick={() => setMostrarInativos(!mostrarInativos)}
-            className={`px-4 py-2 rounded-xl text-sm font-semibold border-2 transition-all ${
-              mostrarInativos
-                ? "bg-warning/10 border-warning text-warning"
-                : "bg-surface border-border text-muted hover:border-secondary"
-            }`}
+            className={`px-4 py-2 rounded-xl text-sm font-semibold border-2 transition-all ${mostrarInativos ? "bg-warning/10 border-warning text-warning" : "bg-surface border-border text-muted hover:border-secondary"}`}
           >
             {mostrarInativos ? "👁️ Viendo Inactivos" : "👁️ Ver Inactivos"}
           </button>
@@ -210,16 +223,11 @@ export default function ClientesList({ isAdmin }: ClientesListProps) {
           type="text"
           value={busca}
           onChange={(e) => setBusca(e.target.value)}
-          placeholder="Buscar por nombre o teléfono (ej: 3146 o María)..."
+          placeholder="Buscar por nombre, teléfono o cédula..."
           className="w-full pl-11 pr-4 py-3 border border-border rounded-xl text-secondary placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all shadow-sm"
         />
         {busca && (
-          <button
-            onClick={() => setBusca("")}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-secondary text-xl"
-          >
-            ×
-          </button>
+          <button onClick={() => setBusca("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-secondary text-xl">×</button>
         )}
       </div>
 
@@ -253,11 +261,23 @@ export default function ClientesList({ isAdmin }: ClientesListProps) {
               </div>
 
               <div className="flex-1 min-w-0">
-                <p className="font-semibold text-secondary truncate group-hover:text-primary transition-colors">
-                  {c.nombre}
-                </p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="font-semibold text-secondary truncate group-hover:text-primary transition-colors">
+                    {c.nombre}
+                  </p>
+                  {isAdmin && c.codigo && (
+                    <span className="text-xs font-bold bg-secondary/10 text-secondary px-2 py-0.5 rounded-full">
+                      #{c.codigo}
+                    </span>
+                  )}
+                  {c.pontos_fidelidade > 0 && (
+                    <span className="text-xs font-bold bg-warning/10 text-warning-dark px-2 py-0.5 rounded-full">
+                      🏆 {c.pontos_fidelidade} pts
+                    </span>
+                  )}
+                </div>
                 <p className="text-sm text-muted">📞 {c.telefono_wsp}</p>
-                {c.notas && <p className="text-xs text-muted mt-0.5 truncate">{c.notas}</p>}
+                {c.cedula && <p className="text-xs text-muted">CC {c.cedula}</p>}
               </div>
 
               {isAdmin && (
@@ -306,11 +326,12 @@ export default function ClientesList({ isAdmin }: ClientesListProps) {
               {editCliente ? "✏️ Editar Cliente" : "👤 Nuevo Cliente"}
             </SheetTitle>
             <SheetDescription>
-              Llena los datos del cliente. El teléfono no debe tener código de país.
+              Nombre, cédula y teléfono son obligatorios. El resto es opcional.
             </SheetDescription>
           </SheetHeader>
 
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
+            {/* Nombre */}
             <div>
               <label className="block text-sm font-medium text-secondary mb-1.5">
                 Nombre completo <span className="text-danger">*</span>
@@ -319,6 +340,22 @@ export default function ClientesList({ isAdmin }: ClientesListProps) {
               {form.formState.errors.nombre && <p className="text-[0.8rem] font-medium text-danger mt-1">{form.formState.errors.nombre.message}</p>}
             </div>
 
+            {/* Cédula */}
+            <div>
+              <label className="block text-sm font-medium text-secondary mb-1.5">
+                Cédula <span className="text-danger">*</span>
+              </label>
+              <Input
+                placeholder="Ej: 1020304050"
+                className="h-12 rounded-xl font-mono"
+                {...form.register("cedula", {
+                  onChange: (e) => { e.target.value = e.target.value.replace(/\D/g, ""); }
+                })}
+              />
+              {form.formState.errors.cedula && <p className="text-[0.8rem] font-medium text-danger mt-1">{form.formState.errors.cedula.message}</p>}
+            </div>
+
+            {/* Teléfono WSP */}
             <div>
               <label className="block text-sm font-medium text-secondary mb-1.5">
                 Teléfono WhatsApp <span className="text-danger">*</span>
@@ -328,32 +365,79 @@ export default function ClientesList({ isAdmin }: ClientesListProps) {
                 placeholder="Ej: 3146713097"
                 className="h-12 rounded-xl font-mono"
                 {...form.register("telefono_wsp", {
-                  onChange: (e) => {
-                    e.target.value = e.target.value.replace(/\D/g, "").slice(0, 10);
-                  }
+                  onChange: (e) => { e.target.value = e.target.value.replace(/\D/g, "").slice(0, 10); }
                 })}
               />
               <p className="text-[0.8rem] text-muted mt-1">Sin código de país (+57). Solo 10 dígitos.</p>
               {form.formState.errors.telefono_wsp && <p className="text-[0.8rem] font-medium text-danger mt-1">{form.formState.errors.telefono_wsp.message}</p>}
             </div>
 
+            {/* Teléfono 2 */}
+            <div>
+              <label className="block text-sm font-medium text-secondary mb-1.5">
+                Teléfono 2 <span className="text-muted font-normal">(opcional)</span>
+              </label>
+              <Input
+                type="tel"
+                placeholder="Ej: 3001234567"
+                className="h-12 rounded-xl font-mono"
+                {...form.register("telefono_2", {
+                  onChange: (e) => { e.target.value = e.target.value.replace(/\D/g, "").slice(0, 10); }
+                })}
+              />
+              {form.formState.errors.telefono_2 && <p className="text-[0.8rem] font-medium text-danger mt-1">{form.formState.errors.telefono_2.message}</p>}
+            </div>
+
+            {/* Email */}
+            <div>
+              <label className="block text-sm font-medium text-secondary mb-1.5">
+                Correo electrónico <span className="text-muted font-normal">(opcional)</span>
+              </label>
+              <Input type="email" placeholder="Ej: maria@email.com" className="h-12 rounded-xl" {...form.register("email")} />
+              {form.formState.errors.email && <p className="text-[0.8rem] font-medium text-danger mt-1">{form.formState.errors.email.message}</p>}
+            </div>
+
+            {/* Fecha de nacimiento */}
+            <div>
+              <label className="block text-sm font-medium text-secondary mb-1.5">
+                🎂 Fecha de nacimiento <span className="text-muted font-normal">(opcional)</span>
+              </label>
+              <Input type="date" className="h-12 rounded-xl" {...form.register("fecha_nacimiento")} />
+            </div>
+
+            {/* Código — solo admin */}
+            {isAdmin && (
+              <div>
+                <label className="block text-sm font-medium text-secondary mb-1.5">
+                  🔢 Código del cliente <span className="text-muted font-normal">(solo admin)</span>
+                </label>
+                <Input
+                  type="number"
+                  placeholder="Ej: 121"
+                  min={1}
+                  className="h-12 rounded-xl font-mono"
+                  {...form.register("codigo")}
+                />
+                <p className="text-[0.8rem] text-muted mt-1">Número secuencial único para identificación manual.</p>
+                {form.formState.errors.codigo && <p className="text-[0.8rem] font-medium text-danger mt-1">{String(form.formState.errors.codigo.message)}</p>}
+              </div>
+            )}
+
+            {/* Notas */}
             <div>
               <label className="block text-sm font-medium text-secondary mb-1.5">
                 Notas <span className="text-muted font-normal">(opcional)</span>
               </label>
               <Input placeholder="Ej: Es alérgica al marisco..." className="h-12 rounded-xl" {...form.register("notas")} />
-              {form.formState.errors.notas && <p className="text-[0.8rem] font-medium text-danger mt-1">{form.formState.errors.notas.message}</p>}
             </div>
 
             <SheetFooter className="mt-6 pt-4 border-t">
-              <Button 
-                type="submit" 
-                disabled={form.formState.isSubmitting} 
+              <Button
+                type="submit"
+                disabled={form.formState.isSubmitting}
                 className="w-full h-12 rounded-xl font-semibold shadow-md text-white bg-primary hover:bg-primary-dark"
               >
-                {form.formState.isSubmitting 
-                  ? "Guardando..." 
-                  : editCliente ? "Actualizar" : "Registrar"}
+                {form.formState.isSubmitting ? "Guardando..." : editCliente ? "Actualizar" : "Registrar"}
               </Button>
             </SheetFooter>
           </form>

@@ -49,6 +49,8 @@ const formSchema = z.object({
   cliente_id: z.string().min(1, "Debe seleccionar un cliente"),
   tipo: z.string().min(1, "Debe seleccionar el tipo de plan"),
   metodo_pago: z.string().min(1, "Debe seleccionar el método de pago"),
+  precio: z.string().min(1, "El precio es obligatorio"),
+  fecha_inicio: z.string().min(1, "La fecha de inicio es obligatoria"),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -62,13 +64,17 @@ export default function TiqueterasList({ isAdmin }: TiqueterasListProps) {
   const [toast, setToast] = useState<{ msg: string; tipo: "ok" | "err" } | null>(null);
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    resolver: zodResolver(formSchema) as any,
     defaultValues: {
       cliente_id: "",
       tipo: "",
       metodo_pago: "",
+      precio: "",
+      fecha_inicio: new Date().toISOString().split("T")[0],
     },
   });
+
 
   const showToast = (msg: string, tipo: "ok" | "err") => {
     setToast({ msg, tipo });
@@ -101,16 +107,22 @@ export default function TiqueterasList({ isAdmin }: TiqueterasListProps) {
   }, [fetchTiqueteras, fetchClientes]);
 
   const abrirSheetNovo = () => {
+    const hoy = new Date();
+    const yyyy = hoy.getFullYear();
+    const mm = String(hoy.getMonth() + 1).padStart(2, "0");
+    const dd = String(hoy.getDate()).padStart(2, "0");
     form.reset({
       cliente_id: "",
       tipo: "",
       metodo_pago: "",
+      precio: "",
+      fecha_inicio: `${yyyy}-${mm}-${dd}`,
     });
     setShowSheet(true);
   };
 
   const onSubmit = async (values: FormValues) => {
-    // 1. Validate if client already has an active tiquetera
+    // 1. Verificar se cliente já tem tiquetera ativa
     const { data: actTiqueteras, error: checkErr } = await supabase
       .from("tiqueteras")
       .select("id")
@@ -127,29 +139,17 @@ export default function TiqueterasList({ isAdmin }: TiqueterasListProps) {
       return;
     }
 
-    // 2. Prepare payload
+    // 2. Montar payload — fecha_vencimiento calculada pelo trigger no banco
     const tipoNum = parseInt(values.tipo);
-    const precio = tipoNum === 15 ? 150000 : 300000;
-    
-    // Usar componentes locales de fecha para evitar desfase de timezone (UTC-5 Colombia)
-    const hoy = new Date();
-    const formatLocalDate = (d: Date) => {
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, "0");
-      const dd = String(d.getDate()).padStart(2, "0");
-      return `${yyyy}-${mm}-${dd}`;
-    };
-    
-    const fechaVencimiento = new Date(hoy);
-    fechaVencimiento.setDate(fechaVencimiento.getDate() + tipoNum);
 
     const dataToSave = {
       cliente_id: values.cliente_id,
       tipo: tipoNum,
-      precio: precio,
+      precio: parseInt(String(values.precio), 10),
       metodo_pago: values.metodo_pago,
-      fecha_inicio: formatLocalDate(hoy),
-      fecha_vencimiento: formatLocalDate(fechaVencimiento),
+      fecha_inicio: values.fecha_inicio,
+      // fecha_vencimiento calculada automaticamente pelo trigger DB
+      // (15 dias → +30 dias | 30 dias → +45 dias)
     };
 
     const { error: insertErr } = await supabase
@@ -424,12 +424,37 @@ export default function TiqueterasList({ isAdmin }: TiqueterasListProps) {
               </div>
             </div>
 
-            <div className="bg-primary/5 p-4 rounded-xl border border-primary/20">
-              <p className="text-sm font-medium text-secondary">
-                Costo Estimado: 
-                <span className="text-primary-dark ml-2 font-bold text-lg">
-                  {form.watch("tipo") === "30" ? "$300.000" : form.watch("tipo") === "15" ? "$150.000" : "$0"}
-                </span>
+            {/* Precio */}
+            <div>
+              <label className="block text-sm font-medium text-secondary mb-1.5">
+                💰 Precio acordado <span className="text-danger">*</span>
+              </label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary font-bold">$</span>
+                <input
+                  type="number"
+                  min={1}
+                  placeholder="Ej: 280000"
+                  className="w-full pl-7 pr-4 h-12 border border-border rounded-xl text-secondary font-mono focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                  {...form.register("precio")}
+                />
+              </div>
+              <p className="text-[0.8rem] text-muted mt-1">Precio acordado con el cliente (puede tener descuento).</p>
+              {form.formState.errors.precio && <p className="text-[0.8rem] font-medium text-danger mt-1">{form.formState.errors.precio.message}</p>}
+            </div>
+
+            {/* Fecha inicio */}
+            <div>
+              <label className="block text-sm font-medium text-secondary mb-1.5">
+                📅 Fecha de Inicio
+              </label>
+              <input
+                type="date"
+                className="w-full h-12 px-4 border border-border rounded-xl text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                {...form.register("fecha_inicio")}
+              />
+              <p className="text-[0.8rem] text-muted mt-1">
+                Vencimiento calculado auto: 15 días → +30 días | 30 días → +45 días.
               </p>
             </div>
 

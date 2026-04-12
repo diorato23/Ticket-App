@@ -28,6 +28,8 @@ async function PortalContent({ token }: { token: string }) {
   }
 
   const nombre = tiquetera.cliente?.nombre || "Amigo";
+  const pontos = tiquetera.cliente?.pontos_fidelidade || 0;
+  const configFid = tiquetera.config_fidelidade;
 
   const usadas = tiquetera.marcaciones_count || 0;
   const tipo = tiquetera.tipo;
@@ -40,6 +42,11 @@ async function PortalContent({ token }: { token: string }) {
 
   const fInicio = formatoCorto.format(new Date(tiquetera.fecha_inicio + "T12:00:00"));
   const fVence = formatoCorto.format(new Date(tiquetera.fecha_vencimiento + "T12:00:00"));
+
+  // Calcular dias para vencimento
+  const diasParaVencer = Math.max(0, Math.ceil(
+    (new Date(tiquetera.fecha_vencimiento + "T12:00:00").getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
+  ));
 
   // Gerar link do Whatsapp
   const numeroVladimir = "573146713097";
@@ -74,7 +81,7 @@ async function PortalContent({ token }: { token: string }) {
 
         {/* Content Body */}
         <div className="px-6 pb-8 pt-4">
-          <div className="text-center mb-8">
+          <div className="text-center mb-6">
             <h2 className="text-2xl font-bold text-gray-800">
               ¡Hola, {nombre}! 👋
             </h2>
@@ -84,8 +91,7 @@ async function PortalContent({ token }: { token: string }) {
           </div>
 
           {/* Card Principal */}
-          <div className={`p-5 rounded-2xl border-2 shadow-sm ${isVencidaOrConsumida ? "bg-gray-50 border-gray-200" : "bg-primary/5 border-primary/20"
-            }`}>
+          <div className={`p-5 rounded-2xl border-2 shadow-sm ${isVencidaOrConsumida ? "bg-gray-50 border-gray-200" : "bg-primary/5 border-primary/20"}`}>
             <div className="flex justify-between items-end mb-3">
               <div>
                 <p className="text-sm font-bold text-gray-400 uppercase tracking-wider">Plan</p>
@@ -94,9 +100,10 @@ async function PortalContent({ token }: { token: string }) {
                 </p>
               </div>
               <div className="text-right">
-                <span className={`text-xs px-2.5 py-1 rounded-full font-bold uppercase tracking-wide ${tiquetera.estado === "activa" ? "bg-success/20 text-success-dark" :
-                    tiquetera.estado === "consumida" ? "bg-gray-200 text-gray-600" : "bg-danger/10 text-danger"
-                  }`}>
+                <span className={`text-xs px-2.5 py-1 rounded-full font-bold uppercase tracking-wide ${
+                  tiquetera.estado === "activa" ? "bg-success/20 text-success-dark" :
+                  tiquetera.estado === "consumida" ? "bg-gray-200 text-gray-600" : "bg-danger/10 text-danger"
+                }`}>
                   {tiquetera.estado}
                 </span>
               </div>
@@ -110,8 +117,9 @@ async function PortalContent({ token }: { token: string }) {
               </div>
               <div className="h-4 bg-gray-200 rounded-full overflow-hidden shadow-inner">
                 <div
-                  className={`h-full transition-all duration-1000 ease-in-out ${percent >= 90 ? "bg-danger" : percent >= 70 ? "bg-warning" : "bg-success"
-                    }`}
+                  className={`h-full transition-all duration-1000 ease-in-out ${
+                    percent >= 90 ? "bg-danger" : percent >= 70 ? "bg-warning" : "bg-success"
+                  }`}
                   style={{ width: `${percent}%` }}
                 ></div>
               </div>
@@ -124,14 +132,54 @@ async function PortalContent({ token }: { token: string }) {
                 <p className="font-medium text-gray-700">{fInicio}</p>
               </div>
               <div>
-                <p className="text-xs text-gray-400 font-bold uppercase mb-0.5">Vence en</p>
-                <p className="font-medium text-gray-700">{fVence}</p>
+                <p className="text-xs text-gray-400 font-bold uppercase mb-0.5">
+                  {isVencidaOrConsumida ? "Venció" : `Vence en ${diasParaVencer}d`}
+                </p>
+                <p className={`font-medium ${diasParaVencer <= 3 && !isVencidaOrConsumida ? "text-danger font-bold" : "text-gray-700"}`}>
+                  {fVence}
+                </p>
               </div>
             </div>
           </div>
 
+          {/* Card de Fidelidade */}
+          {configFid && (
+            <div className="mt-4 p-4 bg-yellow-50 border-2 border-yellow-200 rounded-2xl">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">🏆</span>
+                  <div>
+                    <p className="font-bold text-yellow-800 text-sm">Puntos de Fidelidad</p>
+                    <p className="text-yellow-600 text-xs">{configFid.descricao}</p>
+                  </div>
+                </div>
+                <div className="text-center">
+                  <p className="text-3xl font-black text-yellow-600">{pontos}</p>
+                  <p className="text-xs text-yellow-600">pts</p>
+                </div>
+              </div>
+              {configFid.pontos_meta && (
+                <div>
+                  <div className="flex justify-between text-xs text-yellow-700 mb-1">
+                    <span>Progreso</span>
+                    <span>{pontos % configFid.pontos_meta}/{configFid.pontos_meta} para el próximo</span>
+                  </div>
+                  <div className="h-2 bg-yellow-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-yellow-500 rounded-full transition-all"
+                      style={{ width: `${Math.min(((pontos % configFid.pontos_meta) / configFid.pontos_meta) * 100, 100)}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-yellow-600 mt-1.5 font-medium">
+                    🎁 Premio: {configFid.premio}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* CTA Renovação */}
-          <div className="mt-8">
+          <div className="mt-6">
             <a
               href={linkWpp}
               target="_blank"
@@ -151,3 +199,4 @@ async function PortalContent({ token }: { token: string }) {
     </div>
   );
 }
+

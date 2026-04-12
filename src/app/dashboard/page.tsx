@@ -35,13 +35,24 @@ export default async function DashboardPage() {
   const todayStr = `${yyyy}-${mm}-${dd}`;
   const firstDayStr = `${yyyy}-${mm}-01`;
 
-  // Daqui a 3 Dias
-  const en3Dias = new Date(hoy);
-  en3Dias.setDate(en3Dias.getDate() + 3);
-  const vYYYY = en3Dias.getFullYear();
-  const vMM = String(en3Dias.getMonth() + 1).padStart(2, "0");
-  const vDD = String(en3Dias.getDate()).padStart(2, "0");
-  const in3DaysStr = `${vYYYY}-${vMM}-${vDD}`;
+  // Daqui a 5 Dias (alerta ampliado)
+  const en5Dias = new Date(hoy);
+  en5Dias.setDate(en5Dias.getDate() + 5);
+  const vYYYY = en5Dias.getFullYear();
+  const vMM = String(en5Dias.getMonth() + 1).padStart(2, "0");
+  const vDD = String(en5Dias.getDate()).padStart(2, "0");
+  const in5DaysStr = `${vYYYY}-${vMM}-${vDD}`;
+
+  // Mês e dia de hoje para busca de aniversários
+  const mesHoje = hoy.getMonth() + 1;
+  const diaHoje = hoy.getDate();
+  // Próximos 7 dias para aniversários
+  const anivDatas: { mes: number; dia: number }[] = [];
+  for (let i = 0; i <= 7; i++) {
+    const d = new Date(hoy);
+    d.setDate(d.getDate() + i);
+    anivDatas.push({ mes: d.getMonth() + 1, dia: d.getDate() });
+  }
 
   // Métricas em paralelo
   const [
@@ -51,18 +62,19 @@ export default async function DashboardPage() {
     { data: ingresosMes },
     { data: porVencer },
     { data: movimentacoesHoje },
+    { data: aniversariosRaw },
   ] = await Promise.all([
     supabase.from("clientes").select("*", { count: "exact", head: true }).eq("activo", true),
     supabase.from("tiqueteras").select("*", { count: "exact", head: true }).eq("estado", "activa"),
     supabase.from("marcaciones").select("id, desechable").gte("fecha", todayStr),
     isAdmin ? supabase.from("tiqueteras").select("precio").gte("fecha_inicio", firstDayStr) : Promise.resolve({ data: [] }),
     supabase.from("tiqueteras")
-      .select("id, token_publico, fecha_vencimiento, clientes(nombre, telefono_wsp)")
+      .select("id, token_publico, fecha_vencimiento, tipo, clientes(nombre, telefono_wsp)")
       .eq("estado", "activa")
-      .lte("fecha_vencimiento", in3DaysStr)
+      .lte("fecha_vencimiento", in5DaysStr)
       .gte("fecha_vencimiento", todayStr)
       .order("fecha_vencimiento", { ascending: true }),
-    // Nova query: movimentações ricas do dia
+    // Movimentações ricas do dia
     supabase.from("marcaciones")
       .select(`
         id,
@@ -78,7 +90,27 @@ export default async function DashboardPage() {
       `)
       .gte("fecha", todayStr)
       .order("fecha", { ascending: false }),
+    // Aniversários próximos (7 dias) — filtrar no JS por mês/dia
+    supabase.from("clientes")
+      .select("id, nombre, telefono_wsp, fecha_nacimiento")
+      .eq("activo", true)
+      .not("fecha_nacimiento", "is", null),
   ]);
+
+  // Filtrar aniversários nos próximos 7 dias
+  const aniversarios = (aniversariosRaw ?? []).filter((c: any) => {
+    if (!c.fecha_nacimiento) return false;
+    const nasc = new Date(c.fecha_nacimiento + "T12:00:00");
+    return anivDatas.some(d => d.mes === nasc.getMonth() + 1 && d.dia === nasc.getDate());
+  }).map((c: any) => {
+    const nasc = new Date(c.fecha_nacimiento + "T12:00:00");
+    const hoje = new Date();
+    const isHoje = nasc.getMonth() + 1 === mesHoje && nasc.getDate() === diaHoje;
+    const proxAniv = new Date(hoje.getFullYear(), nasc.getMonth(), nasc.getDate());
+    if (proxAniv < hoje) proxAniv.setFullYear(hoje.getFullYear() + 1);
+    const diasRestantes = Math.ceil((proxAniv.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24));
+    return { ...c, isHoje, diasRestantes };
+  }).sort((a: any, b: any) => a.diasRestantes - b.diasRestantes);
 
   // Cálculos Derivados
   const marcacoesCount = marcacoesHoje?.length || 0;
@@ -333,9 +365,11 @@ export default async function DashboardPage() {
               </div>
             </div>
 
-            {/* Direita: Avisos de Vencimento e Ações */}
+            {/* Direita: Avisos de Vencimento e Aniversários */}
             <div className="lg:col-span-1 space-y-6">
-              <div className="bg-white rounded-3xl border border-border p-6 shadow-sm h-full">
+
+              {/* Card: Próximos a Vencer */}
+              <div className="bg-white rounded-3xl border border-border p-6 shadow-sm">
                 <h3 className="text-lg font-bold text-secondary flex items-center gap-2 mb-5">
                   <span className="w-2 h-2 rounded-full bg-danger animate-pulse"></span>
                   Próximos a Vencer
@@ -346,17 +380,19 @@ export default async function DashboardPage() {
                     {porVencer.map((t) => {
                       const cliente: any = Array.isArray(t.clientes) ? t.clientes[0] : t.clientes;
                       const isToday = t.fecha_vencimiento === todayStr;
-                      
-                      // Format URL text for WA
+                      const diasFaltantes = Math.ceil((new Date(t.fecha_vencimiento + "T12:00:00").getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
                       const wpNum = cliente?.telefono_wsp || "";
-                      const wppText = `¡Hola ${cliente?.nombre}! Recuerda que tu tiquetera en Linda Mariana vence ${isToday ? "HOY" : "pronto"}. Puedes consultar tu plan digital aquí: https://tiquetera-lindamariana.com/mi-tiquetera/${t.token_publico}`;
+                      const wppText = `¡Hola ${cliente?.nombre}! Recuerda que tu tiquetera de ${(t as any).tipo} días en Linda Mariana vence ${isToday ? "HOY" : `en ${diasFaltantes} día${diasFaltantes !== 1 ? "s" : ""}`}. Puedes consultar tu plan digital aquí: https://tiquetera-lindamariana.com/mi-tiquetera/${t.token_publico}`;
                       const waLink = `https://wa.me/57${wpNum}?text=${encodeURIComponent(wppText)}`;
 
                       return (
                         <div key={t.id} className="p-4 rounded-2xl bg-surface border border-gray-100 hover:border-warning/30 transition-colors">
-                          <p className="font-bold text-secondary truncate">{cliente?.nombre}</p>
-                          <p className={`text-xs font-medium mb-3 ${isToday ? "text-danger" : "text-warning"}`}>
-                            Vence: {t.fecha_vencimiento} {isToday && "(Hoy)"}
+                          <div className="flex items-start justify-between gap-2 mb-1">
+                            <p className="font-bold text-secondary truncate">{cliente?.nombre}</p>
+                            <span className="text-xs font-bold bg-primary/10 text-primary px-2 py-0.5 rounded-full flex-shrink-0">{(t as any).tipo}d</span>
+                          </div>
+                          <p className={`text-xs font-medium mb-3 ${isToday ? "text-danger" : diasFaltantes <= 2 ? "text-warning" : "text-muted"}`}>
+                            {isToday ? "⚠️ Vence HOY" : `Vence en ${diasFaltantes} día${diasFaltantes !== 1 ? "s" : ""}`}
                           </p>
                           <a 
                             href={waLink} 
@@ -371,18 +407,58 @@ export default async function DashboardPage() {
                     })}
                   </div>
                 ) : (
-                  <div className="text-center py-10">
+                  <div className="text-center py-8">
                     <span className="text-4xl block mb-2 opacity-50">📆</span>
-                    <p className="text-sm text-muted font-medium">No hay vencimientos en los próximos 3 días.</p>
+                    <p className="text-sm text-muted font-medium">No hay vencimientos en los próximos 5 días.</p>
                   </div>
                 )}
                 
-                <div className="mt-8 pt-6 border-t border-gray-100">
+                <div className="mt-6 pt-4 border-t border-gray-100">
                   <Link href="/tiqueteras" className="text-sm font-bold text-primary hover:text-primary-dark transition-colors flex items-center justify-center gap-1 w-full">
                     Ver todas las Tiqueteras →
                   </Link>
                 </div>
               </div>
+
+              {/* Card: Aniversários */}
+              {aniversarios.length > 0 && (
+                <div className="bg-white rounded-3xl border border-yellow-200 p-6 shadow-sm">
+                  <h3 className="text-lg font-bold text-secondary flex items-center gap-2 mb-5">
+                    🎂 Cumpleaños
+                  </h3>
+                  <div className="space-y-3">
+                    {aniversarios.map((c: any) => {
+                      const waText = c.isHoje
+                        ? `¡Feliz cumpleaños ${c.nombre.split(" ")[0]}! 🎂🎉 Desde Linda Mariana te deseamos un día muy especial.`
+                        : `¡Hola ${c.nombre.split(" ")[0]}! 🎂 En ${c.diasRestantes} días es tu cumpleaños. Desde Linda Mariana te enviamos un abrazo por adelantado.`;
+                      const waLink = `https://wa.me/57${c.telefono_wsp}?text=${encodeURIComponent(waText)}`;
+                      return (
+                        <div key={c.id} className={`p-3 rounded-2xl border transition-colors ${
+                          c.isHoje ? "bg-yellow-50 border-yellow-300" : "bg-surface border-gray-100"
+                        }`}>
+                          <div className="flex items-center gap-2 mb-2">
+                            <p className="font-bold text-secondary text-sm truncate flex-1">{c.nombre}</p>
+                            {c.isHoje ? (
+                              <span className="text-xs font-bold text-yellow-700 bg-yellow-200 px-2 py-0.5 rounded-full flex-shrink-0">¡HOY!</span>
+                            ) : (
+                              <span className="text-xs text-muted flex-shrink-0">en {c.diasRestantes}d</span>
+                            )}
+                          </div>
+                          <a
+                            href={waLink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center text-xs font-bold px-3 py-1.5 rounded-lg bg-green-100 text-green-700 hover:bg-green-200 transition-colors w-full justify-center"
+                          >
+                            {c.isHoje ? "🎉 Felicitar" : "💬 Saludar"}
+                          </a>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
             </div>
           </div>
         </div>

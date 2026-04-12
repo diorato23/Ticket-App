@@ -18,8 +18,10 @@ export default function Navbar({ rol, nombre, logout }: NavbarProps) {
     { href: "/reportes", label: "Reportes", icon: "📑" },
     { href: "/clientes", label: "Clientes", icon: "👥" },
     { href: "/marcacion", label: "Marcación", icon: "✅" },
+    { href: "/dashboard/fidelidade", label: "Fidelidad", icon: "🏆" },
     { href: "/dashboard/equipe", label: "Equipo", icon: "🛡️" },
   ];
+
 
   const operadorLinks = [
     { href: "/marcacion", label: "Marcación", icon: "✅" },
